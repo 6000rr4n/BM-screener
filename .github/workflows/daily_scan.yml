@@ -1,0 +1,43 @@
+name: Daily Stock Scan
+
+on:
+  schedule:
+    - cron: '0 14 * * 1-5'   # 14:00 UTC = 16:00 CET, weekdays
+  workflow_dispatch:           # Manual trigger
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run scanner
+        env:
+          POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          DASHBOARD_URL: "https://6000rr4n.github.io/BM-screener-mobile/"
+        run: python scanner/main.py --static
+
+      - name: Copy dashboard to docs/
+        run: |
+          mkdir -p docs
+          cp output/dashboard.html docs/index.html
+
+      - name: Commit & push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add docs/index.html docs/manifest.json output/scanner_results.xlsx
+          git commit -m "Scan $(date +'%d.%m.%Y %H:%M UTC')" || echo "No changes"
+          git push

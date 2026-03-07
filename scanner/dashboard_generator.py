@@ -1,0 +1,986 @@
+"""Dashboard generator: single-file HTML with inline CSS + JS, dark theme, PWA-ready."""
+
+import json
+import logging
+from datetime import datetime
+from typing import Any
+
+logger = logging.getLogger(__name__)
+
+
+def generate_dashboard(signals: list[dict[str, Any]], scan_info: dict[str, Any]) -> str:
+    """Generate a single-file HTML dashboard with embedded data.
+
+    Args:
+        signals: List of signal dicts from the scanner.
+        scan_info: Dict with total_tickers, scan_time, mode, use_ema_filter.
+
+    Returns:
+        Complete HTML string.
+    """
+    scan_time = datetime.now().strftime("%d.%m.%Y %H:%M")
+    total_tickers = scan_info.get("total_tickers", 0)
+    scan_duration = scan_info.get("scan_time", 0)
+    mode = scan_info.get("mode", "Aggressive")
+    use_ema = scan_info.get("use_ema_filter", False)
+
+    # Stats
+    total_signals = len(signals)
+    breakout_count = sum(1 for s in signals if s["signal_type"] == "BREAKOUT")
+    meanrev_count = sum(1 for s in signals if s["signal_type"] == "MEAN_REV")
+    bullish_count = sum(1 for s in signals if s["signal_direction"] == "BULLISH")
+    bearish_count = sum(1 for s in signals if s["signal_direction"] == "BEARISH")
+
+    # Serialize signals for JS (handle NaN/None)
+    signals_json = json.dumps(signals, default=str)
+
+    from scanner import config as _cfg
+    github_repo = _cfg.GITHUB_REPO
+
+    html = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="BM Scanner">
+<meta name="theme-color" content="#0f172a">
+<meta name="mobile-web-app-capable" content="yes">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect fill='%230f172a' width='100' height='100' rx='20'/><text x='50' y='68' text-anchor='middle' font-size='50' fill='%233b82f6'>S</text></svg>">
+<title>BM Stock Scanner</title>
+<style>
+* {{ margin: 0; padding: 0; box-sizing: border-box; }}
+body {{
+    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', system-ui, sans-serif;
+    background: #0f172a; color: #f1f5f9;
+    min-height: 100vh;
+    min-height: -webkit-fill-available;
+    -webkit-tap-highlight-color: transparent;
+    -webkit-text-size-adjust: 100%;
+    overscroll-behavior-y: contain;
+}}
+html {{ height: -webkit-fill-available; }}
+
+/* ── Header ──────────────────────────────────────────────────────── */
+.header {{
+    background: #1e293b; border-bottom: 1px solid #334155;
+    padding: 16px 24px; display: flex; align-items: center;
+    justify-content: space-between; flex-wrap: wrap; gap: 12px;
+}}
+.header-left h1 {{ font-size: 20px; font-weight: 700; }}
+.header-left .meta {{ font-size: 12px; color: #94a3b8; margin-top: 4px; }}
+.header-right {{ display: flex; gap: 8px; align-items: center; }}
+.btn {{
+    padding: 8px 16px; border-radius: 6px; border: 1px solid #334155;
+    background: #1e293b; color: #f1f5f9; cursor: pointer;
+    font-size: 13px; transition: all 0.15s;
+    -webkit-touch-callout: none;
+}}
+.btn:hover {{ background: #334155; }}
+.btn:active {{ background: #475569; transform: scale(0.97); }}
+.btn-primary {{ background: #3b82f6; border-color: #3b82f6; }}
+.btn-primary:hover {{ background: #2563eb; }}
+.btn-primary:active {{ background: #1d4ed8; }}
+.status-dot {{
+    width: 8px; height: 8px; border-radius: 50%;
+    display: inline-block; margin-right: 4px;
+}}
+.status-green {{ background: #22c55e; }}
+.status-red {{ background: #ef4444; }}
+
+/* ── Pull to Refresh indicator ───────────────────────────────────── */
+.pull-indicator {{
+    text-align: center; padding: 0; height: 0; overflow: hidden;
+    background: #1e293b; color: #64748b; font-size: 13px;
+    transition: height 0.2s, padding 0.2s;
+    display: flex; align-items: center; justify-content: center; gap: 8px;
+}}
+.pull-indicator.visible {{ height: 48px; padding: 12px; }}
+.pull-indicator.loading {{ color: #3b82f6; }}
+.pull-spinner {{
+    width: 18px; height: 18px; border: 2px solid #334155;
+    border-top-color: #3b82f6; border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+}}
+@keyframes spin {{ to {{ transform: rotate(360deg); }} }}
+
+/* ── Controls ────────────────────────────────────────────────────── */
+.controls {{
+    background: #1e293b; border-bottom: 1px solid #334155;
+    padding: 12px 24px; display: flex; flex-wrap: wrap; gap: 12px; align-items: center;
+}}
+.control-group {{ display: flex; gap: 4px; align-items: center; }}
+.control-group label {{
+    font-size: 11px; color: #94a3b8; text-transform: uppercase;
+    letter-spacing: 0.5px; margin-right: 6px;
+}}
+.toggle-btn {{
+    padding: 5px 12px; border-radius: 4px; border: 1px solid #334155;
+    background: transparent; color: #94a3b8; cursor: pointer;
+    font-size: 12px; transition: all 0.15s;
+}}
+.toggle-btn.active {{ background: #3b82f6; color: #fff; border-color: #3b82f6; }}
+.toggle-btn:active {{ transform: scale(0.95); }}
+select {{
+    padding: 5px 10px; border-radius: 4px; border: 1px solid #334155;
+    background: #0f172a; color: #f1f5f9; font-size: 12px;
+}}
+.single-scan {{
+    display: flex; gap: 4px; margin-left: auto;
+}}
+.single-scan input {{
+    padding: 5px 10px; border-radius: 4px; border: 1px solid #334155;
+    background: #0f172a; color: #f1f5f9; font-size: 12px; width: 100px;
+}}
+
+/* ── Mobile filter drawer ────────────────────────────────────────── */
+.filter-toggle-bar {{
+    display: none;
+    background: #1e293b; border-bottom: 1px solid #334155;
+    padding: 10px 16px;
+}}
+.filter-toggle-bar button {{
+    width: 100%; padding: 10px; border-radius: 8px; border: 1px solid #334155;
+    background: #0f172a; color: #94a3b8; font-size: 13px; cursor: pointer;
+    display: flex; align-items: center; justify-content: center; gap: 6px;
+}}
+.filter-toggle-bar button:active {{ background: #1e293b; }}
+.filter-drawer {{ max-height: 2000px; transition: max-height 0.3s ease; overflow: hidden; }}
+.filter-drawer.collapsed {{ max-height: 0; }}
+.filter-drawer.collapsed + .filter-toggle-bar button .chevron {{ transform: rotate(0deg); }}
+.chevron {{ transition: transform 0.2s; transform: rotate(180deg); display: inline-block; }}
+
+/* ── Stats ────────────────────────────────────────────────────────── */
+.stats {{
+    display: flex; gap: 12px; padding: 16px 24px; flex-wrap: wrap;
+}}
+.stat-card {{
+    background: #1e293b; border: 1px solid #334155; border-radius: 8px;
+    padding: 12px 20px; flex: 1; min-width: 120px; text-align: center;
+}}
+.stat-card .value {{ font-size: 24px; font-weight: 700; }}
+.stat-card .label {{ font-size: 11px; color: #94a3b8; margin-top: 2px; }}
+
+/* ── Table ────────────────────────────────────────────────────────── */
+.table-container {{
+    padding: 0 24px 24px; overflow-x: auto;
+}}
+table {{
+    width: 100%; border-collapse: collapse; font-size: 12px;
+}}
+thead th {{
+    background: #1e293b; color: #94a3b8; text-align: left;
+    padding: 10px 8px; border-bottom: 2px solid #334155;
+    cursor: pointer; user-select: none; white-space: nowrap;
+    font-size: 11px; text-transform: uppercase; letter-spacing: 0.3px;
+}}
+thead th:hover {{ color: #f1f5f9; }}
+thead th .sort-arrow {{ margin-left: 4px; opacity: 0.5; }}
+tbody td {{
+    padding: 8px; border-bottom: 1px solid #1e293b;
+    vertical-align: top;
+}}
+tbody tr:hover {{ background: #1e293b; }}
+.ticker-link {{
+    color: #3b82f6; text-decoration: none; font-weight: 600;
+}}
+.ticker-link:hover {{ color: #60a5fa; text-decoration: underline; }}
+.signal-bull-break {{ color: #22c55e; font-weight: 700; font-size: 13px; }}
+.signal-bear-break {{ color: #ef4444; font-weight: 700; font-size: 13px; }}
+.signal-bull-mr {{ color: #4ade80; font-weight: 500; font-size: 12px; }}
+.signal-bear-mr {{ color: #f87171; font-weight: 500; font-size: 12px; }}
+.regime-badge {{
+    display: inline-block; padding: 1px 6px; border-radius: 3px;
+    font-size: 10px; margin-top: 2px;
+}}
+.regime-squeeze {{ background: #1e3a5f; color: #60a5fa; }}
+.regime-expansion {{ background: #3b1f1f; color: #f87171; }}
+.regime-neutral {{ background: #1e293b; color: #94a3b8; }}
+.stock-buy {{ color: #22c55e; font-weight: 700; }}
+.stock-sell {{ color: #ef4444; font-weight: 700; }}
+.score-bar {{
+    width: 60px; height: 6px; background: #334155; border-radius: 3px;
+    overflow: hidden; display: inline-block; vertical-align: middle;
+}}
+.score-fill {{ height: 100%; border-radius: 3px; }}
+.score-green {{ background: #22c55e; }}
+.score-yellow {{ background: #eab308; }}
+.score-red {{ background: #ef4444; }}
+.rsi-high {{ color: #ef4444; }}
+.rsi-low {{ color: #22c55e; }}
+.iv-low {{ color: #22c55e; }}
+.iv-mid {{ color: #eab308; }}
+.iv-high {{ color: #ef4444; }}
+.weekly-bull {{ color: #22c55e; }}
+.weekly-bear {{ color: #ef4444; }}
+.weekly-neutral {{ color: #94a3b8; }}
+.ttm-squeeze {{ color: #3b82f6; }}
+.ttm-fired {{ color: #f97316; font-weight: 700; }}
+.ttm-off {{ color: #475569; }}
+.confirm-yes {{ color: #22c55e; font-weight: 700; font-size: 13px; }}
+.confirm-no {{ color: #ef4444; font-weight: 700; font-size: 13px; }}
+.confirm-detail {{ font-size: 10px; color: #94a3b8; }}
+.pattern-tag {{
+    display: inline-block; padding: 1px 6px; border-radius: 3px;
+    background: #334155; color: #94a3b8; font-size: 10px;
+    margin: 1px;
+}}
+canvas.sparkline {{ display: block; }}
+.sub-text {{ font-size: 10px; color: #94a3b8; }}
+
+/* ── Toast ────────────────────────────────────────────────────────── */
+.toast {{
+    position: fixed; bottom: 24px; right: 24px;
+    background: #1e293b; color: #f1f5f9; padding: 14px 20px;
+    border-radius: 12px; font-size: 13px;
+    display: flex; align-items: center; gap: 8px;
+    z-index: 1000; box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+    border: 1px solid #334155;
+    transform: translateY(100px); opacity: 0;
+    transition: transform 0.3s ease, opacity 0.3s ease;
+}}
+.toast.show {{ transform: translateY(0); opacity: 1; }}
+.toast.toast-error {{ border-color: #ef4444; }}
+.toast.toast-success {{ border-color: #22c55e; }}
+
+/* ── Card Layout (mobile) ─────────────────────────────────────────── */
+.card-container {{
+    display: none;
+    flex-direction: column;
+    gap: 10px;
+    padding: 12px;
+    padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+}}
+.signal-card {{
+    background: #1e293b; border: 1px solid #334155; border-radius: 12px;
+    padding: 14px 16px; transition: all 0.2s ease;
+    -webkit-touch-callout: none;
+}}
+.signal-card.expanded {{ border-color: #3b82f6; }}
+.signal-card.bullish-card {{ border-left: 3px solid #22c55e; }}
+.signal-card.bearish-card {{ border-left: 3px solid #ef4444; }}
+.card-header {{
+    display: flex; justify-content: space-between; align-items: center;
+}}
+.card-ticker {{
+    font-size: 18px; font-weight: 700;
+    display: flex; align-items: center; gap: 8px;
+}}
+.card-ticker a {{ color: #3b82f6; text-decoration: none; }}
+.card-price {{ font-size: 16px; font-weight: 600; color: #f1f5f9; }}
+.card-signal {{
+    margin: 8px 0; display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+}}
+.card-score-row {{
+    display: flex; align-items: center; gap: 10px; margin: 6px 0;
+}}
+.card-score-value {{
+    font-size: 20px; font-weight: 700; min-width: 44px;
+}}
+.card-score-bar {{
+    flex: 1; height: 8px; background: #334155; border-radius: 4px;
+    overflow: hidden;
+}}
+.card-score-bar .score-fill {{ height: 100%; border-radius: 4px; }}
+.card-metrics {{
+    display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 8px;
+    font-size: 13px; margin-top: 10px;
+}}
+.metric-cell {{
+    background: #0f172a; border-radius: 8px; padding: 8px;
+    text-align: center;
+}}
+.card-metrics .metric-label {{ color: #64748b; font-size: 10px; text-transform: uppercase; letter-spacing: 0.3px; }}
+.card-metrics .metric-value {{ color: #e2e8f0; font-weight: 600; font-size: 14px; margin-top: 2px; }}
+.card-details {{
+    display: none; margin-top: 12px; border-top: 1px solid #334155;
+    padding-top: 12px;
+    animation: slideDown 0.2s ease;
+}}
+@keyframes slideDown {{
+    from {{ opacity: 0; transform: translateY(-8px); }}
+    to {{ opacity: 1; transform: translateY(0); }}
+}}
+.signal-card.expanded .card-details {{ display: block; }}
+.card-expand-btn {{
+    background: none; border: none; color: #64748b; font-size: 12px;
+    cursor: pointer; padding: 10px 0 2px; width: 100%; text-align: center;
+    -webkit-touch-callout: none;
+}}
+.card-expand-btn:active {{ color: #3b82f6; }}
+.card-detail-grid {{
+    display: grid; grid-template-columns: 1fr 1fr; gap: 8px;
+    font-size: 13px;
+}}
+.card-detail-grid .metric-cell {{ text-align: left; padding: 8px 10px; }}
+.card-confirm-section {{
+    margin-top: 10px; padding: 10px; background: #0f172a;
+    border-radius: 8px;
+}}
+.card-sparkline-wrap {{
+    margin-top: 10px; background: #0f172a; border-radius: 8px;
+    padding: 8px; overflow: hidden;
+}}
+
+/* ── Swipe hint animation ────────────────────────────────────────── */
+.swipe-hint {{
+    text-align: center; padding: 8px; color: #475569; font-size: 11px;
+    display: none;
+}}
+
+/* ── No signals state ────────────────────────────────────────────── */
+.empty-state {{
+    text-align: center; padding: 60px 24px; color: #475569;
+}}
+.empty-state .empty-icon {{ font-size: 48px; margin-bottom: 12px; }}
+.empty-state .empty-text {{ font-size: 16px; color: #64748b; }}
+
+/* ── Mobile Responsive ────────────────────────────────────────────── */
+@media (max-width: 768px) {{
+    .table-container {{ display: none; }}
+    .card-container {{ display: flex; }}
+    .filter-toggle-bar {{ display: block; }}
+    .header {{
+        flex-direction: column; align-items: flex-start;
+        padding: 12px 16px;
+        padding-top: calc(12px + env(safe-area-inset-top, 0px));
+    }}
+    .header-left h1 {{ font-size: 18px; }}
+    .header-right {{
+        width: 100%; display: flex; flex-wrap: wrap; gap: 6px;
+    }}
+    .header-right .btn {{
+        min-height: 44px; flex: 1; min-width: 0;
+        display: flex; align-items: center; justify-content: center;
+        font-size: 13px; border-radius: 8px;
+    }}
+    .controls {{
+        padding: 10px 16px; gap: 8px;
+        flex-direction: column; align-items: stretch;
+    }}
+    .control-group {{
+        flex-wrap: wrap;
+    }}
+    .control-group label {{
+        width: 100%; margin-bottom: 4px; font-size: 12px;
+    }}
+    .toggle-btn {{
+        min-height: 44px; padding: 8px 14px; font-size: 13px;
+        border-radius: 8px; flex: 1;
+    }}
+    select {{
+        min-height: 44px; font-size: 14px; padding: 8px 12px;
+        border-radius: 8px; width: 100%;
+    }}
+    .single-scan {{
+        margin-left: 0; width: 100%;
+    }}
+    .single-scan input {{
+        flex: 1; min-height: 44px; font-size: 16px;
+        border-radius: 8px; padding: 8px 14px;
+    }}
+    .single-scan .btn {{
+        min-height: 44px; border-radius: 8px;
+    }}
+    .stats {{
+        padding: 10px 12px; gap: 6px;
+    }}
+    .stat-card {{
+        flex: 1 1 calc(50% - 3px); min-width: 0;
+        padding: 10px 8px; border-radius: 10px;
+    }}
+    .stat-card .value {{ font-size: 20px; }}
+    .stat-card .label {{ font-size: 10px; }}
+    .stat-card:first-child {{
+        flex: 1 1 100%;
+    }}
+    .toast {{
+        left: 12px; right: 12px;
+        bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+        text-align: center; justify-content: center;
+        border-radius: 12px;
+    }}
+    .swipe-hint {{ display: block; }}
+    .server-only {{ display: none !important; }}
+}}
+
+/* ── Small phones ─────────────────────────────────────────────────── */
+@media (max-width: 380px) {{
+    .card-metrics {{ grid-template-columns: 1fr 1fr; }}
+    .stat-card .value {{ font-size: 18px; }}
+    .card-ticker {{ font-size: 16px; }}
+    .card-price {{ font-size: 15px; }}
+}}
+</style>
+</head>
+<body>
+
+<div class="pull-indicator" id="pullIndicator">
+    <span id="pullText">Povuci za osvjezavanje</span>
+</div>
+
+<div class="header">
+    <div class="header-left">
+        <h1>BM Stock Scanner</h1>
+        <div class="meta">
+            {scan_time} &middot; {total_tickers} tickers &middot;
+            {total_signals} signals &middot; {scan_duration}s
+        </div>
+    </div>
+    <div class="header-right">
+        <span id="serverStatus" class="server-only"><span class="status-dot status-red"></span>Offline</span>
+        <button class="btn server-only" onclick="downloadExcel()">Excel</button>
+        <button class="btn server-only" onclick="runNewScan()">Novi Scan</button>
+        <button class="btn btn-primary" onclick="triggerGitHubScan()">&#9729; Cloud Scan</button>
+    </div>
+</div>
+
+<div class="controls filter-drawer" id="filterDrawer">
+    <div class="control-group">
+        <label>Liste:</label>
+        <button class="toggle-btn active" data-list="sp500" onclick="toggleList(this)">S&P 500</button>
+        <button class="toggle-btn active" data-list="nasdaq" onclick="toggleList(this)">Nasdaq 100</button>
+        <button class="toggle-btn active" data-list="dow" onclick="toggleList(this)">Dow 30</button>
+        <button class="toggle-btn active" data-list="custom" onclick="toggleList(this)">Custom</button>
+    </div>
+    <div class="control-group">
+        <label>Mode:</label>
+        <select id="modeSelect">
+            <option value="Aggressive" {"selected" if mode == "Aggressive" else ""}>Aggressive</option>
+            <option value="Normal" {"selected" if mode == "Normal" else ""}>Normal</option>
+        </select>
+    </div>
+    <div class="control-group">
+        <label>EMA Filter:</label>
+        <select id="emaSelect">
+            <option value="false" {"selected" if not use_ema else ""}>Isključen</option>
+            <option value="true" {"selected" if use_ema else ""}>Uključen</option>
+        </select>
+    </div>
+    <div class="control-group">
+        <label>Signal:</label>
+        <button class="toggle-btn active" data-filter="all" onclick="setSignalFilter(this)">Svi</button>
+        <button class="toggle-btn" data-filter="BREAKOUT" onclick="setSignalFilter(this)">Breakout</button>
+        <button class="toggle-btn" data-filter="MEAN_REV" onclick="setSignalFilter(this)">Mean Rev</button>
+    </div>
+    <div class="control-group">
+        <label>Smjer:</label>
+        <button class="toggle-btn active" data-dir="all" onclick="setDirFilter(this)">Svi</button>
+        <button class="toggle-btn" data-dir="BULLISH" onclick="setDirFilter(this)">Bullish</button>
+        <button class="toggle-btn" data-dir="BEARISH" onclick="setDirFilter(this)">Bearish</button>
+    </div>
+    <div class="single-scan">
+        <input type="text" id="singleTicker" placeholder="AAPL" />
+        <button class="btn" onclick="scanSingle()">Scan</button>
+    </div>
+</div>
+<div class="filter-toggle-bar">
+    <button onclick="toggleFilterDrawer()">
+        <span>Filteri</span>
+        <span class="chevron" id="filterChevron">&#9660;</span>
+    </button>
+</div>
+
+<div class="stats">
+    <div class="stat-card"><div class="value" id="statTotal">{total_signals}</div><div class="label">Ukupno</div></div>
+    <div class="stat-card"><div class="value" style="color:#3b82f6" id="statBreakout">{breakout_count}</div><div class="label">Breakout</div></div>
+    <div class="stat-card"><div class="value" style="color:#a855f7" id="statMeanrev">{meanrev_count}</div><div class="label">Mean Rev</div></div>
+    <div class="stat-card"><div class="value" style="color:#22c55e" id="statBullish">{bullish_count}</div><div class="label">Bullish</div></div>
+    <div class="stat-card"><div class="value" style="color:#ef4444" id="statBearish">{bearish_count}</div><div class="label">Bearish</div></div>
+</div>
+
+<div class="table-container">
+<table id="signalTable">
+<thead>
+<tr>
+    <th onclick="sortTable(0)">Ticker <span class="sort-arrow"></span></th>
+    <th onclick="sortTable(1)">Cijena <span class="sort-arrow"></span></th>
+    <th>Signal</th>
+    <th>Dionička str.</th>
+    <th>Opcijska str.</th>
+    <th onclick="sortTable(5,'num')">Score <span class="sort-arrow"></span></th>
+    <th onclick="sortTable(6,'num')">RSI <span class="sort-arrow"></span></th>
+    <th onclick="sortTable(7,'num')">BBW% <span class="sort-arrow"></span></th>
+    <th onclick="sortTable(8,'num')">ATR% <span class="sort-arrow"></span></th>
+    <th onclick="sortTable(9,'num')">IV Rank <span class="sort-arrow"></span></th>
+    <th onclick="sortTable(10)">Weekly <span class="sort-arrow"></span></th>
+    <th>TTM Squeeze</th>
+    <th>Potvrda</th>
+    <th>Patterns</th>
+    <th>Chart</th>
+</tr>
+</thead>
+<tbody id="signalBody"></tbody>
+</table>
+</div>
+
+<div class="card-container" id="cardContainer"></div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const SIGNALS = {signals_json};
+let currentSignalFilter = 'all';
+let currentDirFilter = 'all';
+let sortCol = -1;
+let sortAsc = true;
+
+function getSignalHTML(s) {{
+    let cls, icon, label;
+    if (s.signal_type === 'BREAKOUT' && s.signal_direction === 'BULLISH') {{
+        cls = 'signal-bull-break'; icon = '&#8593;'; label = 'Bullish Breakout';
+    }} else if (s.signal_type === 'BREAKOUT' && s.signal_direction === 'BEARISH') {{
+        cls = 'signal-bear-break'; icon = '&#8595;'; label = 'Bearish Breakout';
+    }} else if (s.signal_type === 'MEAN_REV' && s.signal_direction === 'BULLISH') {{
+        cls = 'signal-bull-mr'; icon = '&#8593;'; label = 'Bull MeanRev';
+    }} else {{
+        cls = 'signal-bear-mr'; icon = '&#8595;'; label = 'Bear MeanRev';
+    }}
+    let regimeCls = s.regime === 'SQUEEZE' ? 'regime-squeeze' : s.regime === 'EXPANSION' ? 'regime-expansion' : 'regime-neutral';
+    return `<span class="${{cls}}">${{icon}} ${{label}}</span><br><span class="regime-badge ${{regimeCls}}">${{s.regime}}</span>`;
+}}
+
+function getScoreHTML(s) {{
+    let score = s.score || 0;
+    let cls = score >= 65 ? 'score-green' : score >= 45 ? 'score-yellow' : 'score-red';
+    let lbl = s.signal_type === 'BREAKOUT' ? 'Squeeze' : 'Expansion';
+    return `<div>${{score.toFixed(1)}}</div><div class="score-bar"><div class="score-fill ${{cls}}" style="width:${{score}}%"></div></div><div class="sub-text">${{lbl}}</div>`;
+}}
+
+function getRSIHTML(rsi) {{
+    if (rsi == null) return '-';
+    let cls = rsi > 65 ? 'rsi-high' : rsi < 35 ? 'rsi-low' : '';
+    return `<span class="${{cls}}">${{rsi.toFixed(1)}}</span>`;
+}}
+
+function getIVRankHTML(rank) {{
+    if (rank == null) return '-';
+    let cls = rank < 30 ? 'iv-low' : rank > 70 ? 'iv-high' : 'iv-mid';
+    return `<span class="${{cls}}">${{rank.toFixed(1)}}</span>`;
+}}
+
+function getWeeklyHTML(s) {{
+    let cls = s.weekly_trend === 'Bullish' ? 'weekly-bull' : s.weekly_trend === 'Bearish' ? 'weekly-bear' : 'weekly-neutral';
+    let arrow = s.weekly_trend === 'Bullish' ? '&#8593;' : s.weekly_trend === 'Bearish' ? '&#8595;' : '&#8594;';
+    let rsi = s.weekly_rsi != null ? `<div class="sub-text">RSI ${{s.weekly_rsi.toFixed(1)}}</div>` : '';
+    return `<span class="${{cls}}">${{arrow}} ${{s.weekly_trend}}</span>${{rsi}}`;
+}}
+
+function getTTMHTML(s) {{
+    let statusHTML;
+    if (s.ttm_squeeze_on) {{
+        statusHTML = '<span class="ttm-squeeze">&#9679; SQUEEZE</span>';
+    }} else if (s.ttm_squeeze_off) {{
+        statusHTML = '<span class="ttm-fired">&#9679; FIRED!</span>';
+    }} else {{
+        statusHTML = '<span class="ttm-off">&#9675; OFF</span>';
+    }}
+    let colorMap = {{lime:'#22c55e',green:'#15803d',red:'#ef4444',maroon:'#7f1d1d',flat:'#475569'}};
+    let hColor = colorMap[s.ttm_hist_color] || '#475569';
+    let dirArrow = s.ttm_momentum_dir === 'UP' ? '&#8593;' : s.ttm_momentum_dir === 'DOWN' ? '&#8595;' : '&#8594;';
+    return `${{statusHTML}}<br><span style="color:${{hColor}}">&#9632;</span> ${{dirArrow}} ${{s.ttm_momentum_dir}}`;
+}}
+
+function getConfirmHTML(s) {{
+    let main = s.confirmed ? '<span class="confirm-yes">Da</span>' : '<span class="confirm-no">Ne</span>';
+    let details = (s.confirm_details || []).map(d => {{
+        let color = d.startsWith('✓') ? '#22c55e' : '#ef4444';
+        return `<span style="color:${{color}}">${{d}}</span>`;
+    }}).join(' &middot; ');
+    return `${{main}}<div class="confirm-detail">${{details}}</div>`;
+}}
+
+function getPatternsHTML(patterns) {{
+    if (!patterns) return '';
+    return patterns.split(', ').map(p => `<span class="pattern-tag">${{p}}</span>`).join('');
+}}
+
+function renderTable() {{
+    let filtered = SIGNALS.filter(s => {{
+        if (currentSignalFilter !== 'all' && s.signal_type !== currentSignalFilter) return false;
+        if (currentDirFilter !== 'all' && s.signal_direction !== currentDirFilter) return false;
+        return true;
+    }});
+
+    // Update stats
+    document.getElementById('statTotal').textContent = filtered.length;
+    document.getElementById('statBreakout').textContent = filtered.filter(s => s.signal_type === 'BREAKOUT').length;
+    document.getElementById('statMeanrev').textContent = filtered.filter(s => s.signal_type === 'MEAN_REV').length;
+    document.getElementById('statBullish').textContent = filtered.filter(s => s.signal_direction === 'BULLISH').length;
+    document.getElementById('statBearish').textContent = filtered.filter(s => s.signal_direction === 'BEARISH').length;
+
+    let tbody = document.getElementById('signalBody');
+    tbody.innerHTML = '';
+
+    filtered.forEach((s, idx) => {{
+        let tr = document.createElement('tr');
+        let stockDir = s.signal_direction === 'BULLISH'
+            ? '<span class="stock-buy">&#8593; BUY</span>'
+            : '<span class="stock-sell">&#8595; SELL</span>';
+        let optStr = `${{s.option_strategy}}<div class="sub-text">${{s.dte_range}}</div>`;
+
+        tr.innerHTML = `
+            <td><a class="ticker-link" href="https://www.tradingview.com/chart/?symbol=${{s.ticker}}" target="_blank">${{s.ticker}}</a></td>
+            <td>$${{s.last_price.toFixed(2)}}</td>
+            <td>${{getSignalHTML(s)}}</td>
+            <td>${{stockDir}}</td>
+            <td>${{optStr}}</td>
+            <td>${{getScoreHTML(s)}}</td>
+            <td>${{getRSIHTML(s.rsi)}}</td>
+            <td>${{s.bbw_pct != null ? s.bbw_pct.toFixed(1) : '-'}}</td>
+            <td>${{s.atr_pct != null ? s.atr_pct.toFixed(2) : '-'}}</td>
+            <td>${{getIVRankHTML(s.iv_rank)}}</td>
+            <td>${{getWeeklyHTML(s)}}</td>
+            <td>${{getTTMHTML(s)}}</td>
+            <td>${{getConfirmHTML(s)}}</td>
+            <td>${{getPatternsHTML(s.patterns)}}</td>
+            <td><canvas class="sparkline" id="spark-${{idx}}" width="80" height="30"></canvas></td>
+        `;
+        tbody.appendChild(tr);
+    }});
+
+    // Draw sparklines
+    filtered.forEach((s, idx) => {{
+        let canvas = document.getElementById('spark-' + idx);
+        if (canvas && s.sparkline && s.sparkline.length > 1) {{
+            drawSparkline(canvas, s.sparkline);
+        }}
+    }});
+
+    // Render cards for mobile
+    renderCards(filtered);
+}}
+
+function renderCards(filtered) {{
+    let container = document.getElementById('cardContainer');
+    if (!container) return;
+    container.innerHTML = '';
+
+    if (filtered.length === 0) {{
+        container.innerHTML = `<div class="empty-state">
+            <div class="empty-icon">&#128269;</div>
+            <div class="empty-text">Nema signala za odabrane filtere</div>
+        </div>`;
+        return;
+    }}
+
+    filtered.forEach((s, idx) => {{
+        let dirCls = s.signal_direction === 'BULLISH' ? 'stock-buy' : 'stock-sell';
+        let dirLabel = s.signal_direction === 'BULLISH' ? '&#8593; BUY' : '&#8595; SELL';
+        let signalHtml = getSignalHTML(s);
+        let scoreVal = (s.score || 0).toFixed(1);
+        let scoreCls = s.score >= 65 ? 'score-green' : s.score >= 45 ? 'score-yellow' : 'score-red';
+        let cardBorder = s.signal_direction === 'BULLISH' ? 'bullish-card' : 'bearish-card';
+        let confirmIcon = s.confirmed ? '&#10003;' : '&#10007;';
+        let confirmCls = s.confirmed ? 'confirm-yes' : 'confirm-no';
+
+        let card = document.createElement('div');
+        card.className = `signal-card ${{cardBorder}}`;
+        card.innerHTML = `
+            <div class="card-header">
+                <div class="card-ticker">
+                    <a href="https://www.tradingview.com/chart/?symbol=${{s.ticker}}" target="_blank">${{s.ticker}}</a>
+                    <span class="${{dirCls}}" style="font-size:13px">${{dirLabel}}</span>
+                    <span class="${{confirmCls}}" style="font-size:14px">${{confirmIcon}}</span>
+                </div>
+                <div class="card-price">$${{s.last_price.toFixed(2)}}</div>
+            </div>
+            <div class="card-signal">${{signalHtml}}</div>
+            <div class="card-score-row">
+                <span class="card-score-value ${{scoreCls}}">${{scoreVal}}</span>
+                <div class="card-score-bar">
+                    <div class="score-fill ${{scoreCls}}" style="width:${{Math.min(s.score || 0, 100)}}%"></div>
+                </div>
+            </div>
+            <div class="card-metrics">
+                <div class="metric-cell"><span class="metric-label">RSI</span><div class="metric-value">${{getRSIHTML(s.rsi)}}</div></div>
+                <div class="metric-cell"><span class="metric-label">BBW%</span><div class="metric-value">${{s.bbw_pct != null ? s.bbw_pct.toFixed(1) : '-'}}</div></div>
+                <div class="metric-cell"><span class="metric-label">Weekly</span><div class="metric-value">${{getWeeklyHTML(s)}}</div></div>
+                <div class="metric-cell"><span class="metric-label">TTM</span><div class="metric-value">${{getTTMHTML(s)}}</div></div>
+            </div>
+            <div class="card-details">
+                <div class="card-detail-grid">
+                    <div class="metric-cell"><span class="metric-label">ATR%</span><div class="metric-value">${{s.atr_pct != null ? s.atr_pct.toFixed(2) : '-'}}</div></div>
+                    <div class="metric-cell"><span class="metric-label">IV Rank</span><div class="metric-value">${{getIVRankHTML(s.iv_rank)}}</div></div>
+                    <div class="metric-cell"><span class="metric-label">Option</span><div class="metric-value" style="font-size:11px">${{s.option_strategy}}</div></div>
+                    <div class="metric-cell"><span class="metric-label">DTE</span><div class="metric-value">${{s.dte_range}}</div></div>
+                </div>
+                <div class="card-confirm-section">${{getConfirmHTML(s)}}</div>
+                <div style="margin-top:8px">${{getPatternsHTML(s.patterns)}}</div>
+                <div class="card-sparkline-wrap">
+                    <canvas class="sparkline" id="card-spark-${{idx}}" width="300" height="50"></canvas>
+                </div>
+            </div>
+            <button class="card-expand-btn" onclick="toggleCard(this)">Detalji &#9660;</button>
+        `;
+        container.appendChild(card);
+    }});
+
+    // Show swipe hint on first visit
+    if (!localStorage.getItem('hint_seen')) {{
+        let hint = document.createElement('div');
+        hint.className = 'swipe-hint';
+        hint.textContent = 'Tap "Detalji" za vise informacija';
+        container.insertBefore(hint, container.firstChild);
+        setTimeout(() => {{ hint.style.display = 'none'; localStorage.setItem('hint_seen', '1'); }}, 5000);
+    }}
+}}
+
+function toggleCard(btn) {{
+    let card = btn.closest('.signal-card');
+    let wasExpanded = card.classList.contains('expanded');
+    card.classList.toggle('expanded');
+    btn.innerHTML = wasExpanded ? 'Detalji &#9660;' : 'Zatvori &#9650;';
+
+    // Draw sparkline on first expand
+    if (!wasExpanded) {{
+        let canvas = card.querySelector('.sparkline');
+        if (canvas && canvas.id.startsWith('card-spark-')) {{
+            let idx = parseInt(canvas.id.replace('card-spark-', ''));
+            let filtered = SIGNALS.filter(s => {{
+                if (currentSignalFilter !== 'all' && s.signal_type !== currentSignalFilter) return false;
+                if (currentDirFilter !== 'all' && s.signal_direction !== currentDirFilter) return false;
+                return true;
+            }});
+            let sig = filtered[idx];
+            if (sig && sig.sparkline && sig.sparkline.length > 1) {{
+                requestAnimationFrame(() => drawSparkline(canvas, sig.sparkline));
+            }}
+        }}
+    }}
+}}
+
+function drawSparkline(canvas, data) {{
+    let ctx = canvas.getContext('2d');
+    let w = canvas.width, h = canvas.height;
+    ctx.clearRect(0, 0, w, h);
+    let min = Math.min(...data), max = Math.max(...data);
+    let range = max - min || 1;
+    let color = data[data.length-1] >= data[0] ? '#22c55e' : '#ef4444';
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    data.forEach((v, i) => {{
+        let x = (i / (data.length - 1)) * w;
+        let y = h - ((v - min) / range) * (h - 4) - 2;
+        if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    }});
+    ctx.stroke();
+}}
+
+function sortTable(colIdx, type) {{
+    let tbody = document.getElementById('signalBody');
+    let rows = Array.from(tbody.querySelectorAll('tr'));
+    if (sortCol === colIdx) {{ sortAsc = !sortAsc; }} else {{ sortCol = colIdx; sortAsc = true; }}
+    rows.sort((a, b) => {{
+        let aVal = a.cells[colIdx].textContent.trim().replace('$','');
+        let bVal = b.cells[colIdx].textContent.trim().replace('$','');
+        if (type === 'num') {{
+            aVal = parseFloat(aVal) || 0;
+            bVal = parseFloat(bVal) || 0;
+        }}
+        if (aVal < bVal) return sortAsc ? -1 : 1;
+        if (aVal > bVal) return sortAsc ? 1 : -1;
+        return 0;
+    }});
+    rows.forEach(r => tbody.appendChild(r));
+}}
+
+function toggleList(btn) {{
+    btn.classList.toggle('active');
+}}
+
+function setSignalFilter(btn) {{
+    btn.parentElement.querySelectorAll('.toggle-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    currentSignalFilter = btn.dataset.filter;
+    renderTable();
+}}
+
+function setDirFilter(btn) {{
+    btn.parentElement.querySelectorAll('.toggle-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    currentDirFilter = btn.dataset.dir;
+    renderTable();
+}}
+
+function showToast(msg, type) {{
+    let t = document.getElementById('toast');
+    t.textContent = msg;
+    t.className = 'toast show' + (type === 'error' ? ' toast-error' : type === 'success' ? ' toast-success' : '');
+    setTimeout(() => t.classList.remove('show'), 4000);
+}}
+
+// ── Filter drawer toggle ──────────────────────────────────
+let filterOpen = false;
+function toggleFilterDrawer() {{
+    let drawer = document.getElementById('filterDrawer');
+    let chevron = document.getElementById('filterChevron');
+    filterOpen = !filterOpen;
+    if (filterOpen) {{
+        drawer.classList.remove('collapsed');
+        chevron.style.transform = 'rotate(180deg)';
+    }} else {{
+        drawer.classList.add('collapsed');
+        chevron.style.transform = 'rotate(0deg)';
+    }}
+}}
+// Start collapsed on mobile
+if (window.innerWidth <= 768) {{
+    document.getElementById('filterDrawer').classList.add('collapsed');
+}}
+
+// ── Pull to Refresh (mobile, static page) ─────────────────
+(function() {{
+    let startY = 0;
+    let pulling = false;
+    let indicator = document.getElementById('pullIndicator');
+    let pullText = document.getElementById('pullText');
+
+    document.addEventListener('touchstart', function(e) {{
+        if (window.scrollY === 0 && window.innerWidth <= 768) {{
+            startY = e.touches[0].clientY;
+            pulling = true;
+        }}
+    }}, {{ passive: true }});
+
+    document.addEventListener('touchmove', function(e) {{
+        if (!pulling) return;
+        let dy = e.touches[0].clientY - startY;
+        if (dy > 20 && dy < 150) {{
+            indicator.classList.add('visible');
+            pullText.textContent = dy > 80 ? 'Pusti za osvjezavanje' : 'Povuci za osvjezavanje';
+        }}
+    }}, {{ passive: true }});
+
+    document.addEventListener('touchend', function(e) {{
+        if (!pulling) return;
+        pulling = false;
+        let wasVisible = indicator.classList.contains('visible');
+        let text = pullText.textContent;
+        if (wasVisible && text === 'Pusti za osvjezavanje') {{
+            pullText.innerHTML = '<div class="pull-spinner"></div> Osvjezavam...';
+            indicator.classList.add('loading');
+            setTimeout(() => location.reload(), 600);
+        }} else {{
+            indicator.classList.remove('visible');
+        }}
+    }}, {{ passive: true }});
+}})();
+
+async function runNewScan() {{
+    let params = {{
+        mode: document.getElementById('modeSelect').value,
+        use_ema: document.getElementById('emaSelect').value === 'true',
+        use_sp500: document.querySelector('[data-list="sp500"]').classList.contains('active'),
+        use_nasdaq: document.querySelector('[data-list="nasdaq"]').classList.contains('active'),
+        use_dow: document.querySelector('[data-list="dow"]').classList.contains('active'),
+        use_custom: document.querySelector('[data-list="custom"]').classList.contains('active'),
+    }};
+    try {{
+        let resp = await fetch('/run_scan', {{
+            method: 'POST',
+            headers: {{'Content-Type': 'application/json'}},
+            body: JSON.stringify(params)
+        }});
+        if (resp.ok) {{ location.reload(); }}
+        else {{ showToast('Scan error: ' + resp.statusText); }}
+    }} catch(e) {{
+        showToast('Server nije dostupan. Pokrenite: python scanner/main.py');
+    }}
+}}
+
+async function scanSingle() {{
+    let ticker = document.getElementById('singleTicker').value.trim().toUpperCase();
+    if (!ticker) return;
+    let mode = document.getElementById('modeSelect').value;
+    let ema = document.getElementById('emaSelect').value;
+    try {{
+        let resp = await fetch(`/scan_single?ticker=${{ticker}}&mode=${{mode}}&use_ema=${{ema}}`);
+        if (resp.ok) {{ location.reload(); }}
+        else {{ showToast('Ticker ' + ticker + ': no signal or error'); }}
+    }} catch(e) {{
+        showToast('Server nije dostupan.');
+    }}
+}}
+
+async function downloadExcel() {{
+    try {{
+        let resp = await fetch('/download_excel');
+        if (resp.ok) {{
+            let blob = await resp.blob();
+            let url = URL.createObjectURL(blob);
+            let a = document.createElement('a');
+            a.href = url; a.download = 'scanner_results.xlsx';
+            a.click(); URL.revokeObjectURL(url);
+        }} else {{ showToast('Excel download failed'); }}
+    }} catch(e) {{
+        showToast('Server nije dostupan za download.');
+    }}
+}}
+
+// GitHub Actions dispatch
+const GITHUB_REPO = '{github_repo}';
+async function triggerGitHubScan() {{
+    let token = localStorage.getItem('gh_pat');
+    if (!token) {{
+        token = prompt('GitHub Personal Access Token (actions:write scope).\\nSprema se lokalno na ovom uređaju:');
+        if (!token) return;
+        localStorage.setItem('gh_pat', token);
+    }}
+    try {{
+        showToast('Pokrećem Cloud Scan...');
+        let resp = await fetch(
+            `https://api.github.com/repos/${{GITHUB_REPO}}/actions/workflows/daily_scan.yml/dispatches`,
+            {{
+                method: 'POST',
+                headers: {{
+                    'Authorization': `token ${{token}}`,
+                    'Accept': 'application/vnd.github.v3+json'
+                }},
+                body: JSON.stringify({{ ref: 'main' }})
+            }}
+        );
+        if (resp.status === 204) {{
+            showToast('Scan pokrenut! Rezultati za ~5 min. Osvježi stranicu.');
+        }} else if (resp.status === 401) {{
+            localStorage.removeItem('gh_pat');
+            showToast('Token nevažeći. Pokušaj ponovo.');
+        }} else {{
+            showToast('Greška: ' + resp.status);
+        }}
+    }} catch(e) {{
+        showToast('Mrežna greška. Provjeri internetsku vezu.');
+    }}
+}}
+
+function clearGitHubToken() {{
+    localStorage.removeItem('gh_pat');
+    showToast('GitHub token obrisan.');
+}}
+
+// Server heartbeat
+async function checkServer() {{
+    try {{
+        let resp = await fetch('/health');
+        if (resp.ok) {{
+            document.getElementById('serverStatus').innerHTML =
+                '<span class="status-dot status-green"></span>Online';
+        }} else {{ throw new Error(); }}
+    }} catch(e) {{
+        document.getElementById('serverStatus').innerHTML =
+            '<span class="status-dot status-red"></span>Offline';
+    }}
+}}
+
+// Init
+renderTable();
+checkServer();
+setInterval(checkServer, 30000);
+</script>
+</body>
+</html>"""
+
+    return html
