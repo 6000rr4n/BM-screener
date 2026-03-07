@@ -247,7 +247,7 @@ def detect_signals_for_ticker(
             return None
 
         # Use the last bar for current indicator values (price, RSI, etc.)
-        # but the signal was detected on signal_bar_idx
+        last = df.iloc[-1]
 
         # Weekly trend
         weekly_info = calc_weekly_trend(df_weekly)
@@ -314,6 +314,7 @@ def detect_signals_for_ticker(
             "sparkline": sparkline,
             "confirmed": confirmed,
             "confirm_details": confirm_details,
+            "signal_age": abs(signal_bar_idx + 1),
         }
     except Exception as e:
         logger.error(f"{ticker}: signal detection error: {e}")
