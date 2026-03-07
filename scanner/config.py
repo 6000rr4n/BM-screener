@@ -68,3 +68,7 @@ DOW30_URL: str = "https://en.wikipedia.org/wiki/Dow_Jones_Industrial_Average"
 
 # ── Flask ─────────────────────────────────────────────────────────────────────
 FLASK_PORT: int = 5050
+
+# ── GitHub ────────────────────────────────────────────────────────────────────
+GITHUB_REPO: str = "6000rr4n/BM-screener-mobile"
+DASHBOARD_URL: str = "https://6000rr4n.github.io/BM-screener-mobile/"

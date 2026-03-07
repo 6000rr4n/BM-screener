@@ -12,6 +12,7 @@ from scanner import config
 from scanner.scanner import run_scan, get_ticker_signal
 from scanner.dashboard_generator import generate_dashboard
 from scanner.excel_exporter import export_to_excel
+from scanner.notifier import send_scan_notification
 
 logging.basicConfig(
     level=logging.INFO,
@@ -143,6 +144,9 @@ def main() -> None:
     with open(config.DASHBOARD_FILE, "w") as f:
         f.write(_last_html)
     logger.info(f"Dashboard saved to {config.DASHBOARD_FILE}")
+
+    # Send Telegram notification
+    send_scan_notification(result["signals"], result)
 
     if args.static:
         logger.info("Static mode: exiting without starting server")

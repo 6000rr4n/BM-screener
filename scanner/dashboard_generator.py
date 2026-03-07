@@ -34,6 +34,9 @@ def generate_dashboard(signals: list[dict[str, Any]], scan_info: dict[str, Any])
     # Serialize signals for JS (handle NaN/None)
     signals_json = json.dumps(signals, default=str)
 
+    from scanner import config as _cfg
+    github_repo = _cfg.GITHUB_REPO
+
     html = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -176,6 +179,104 @@ canvas.sparkline {{ display: block; }}
     z-index: 1000; box-shadow: 0 4px 12px rgba(0,0,0,0.3);
 }}
 .toast.show {{ display: block; }}
+
+/* ── Card Layout (mobile) ─────────────────────────────────────────── */
+.card-container {{
+    display: none;
+    flex-direction: column;
+    gap: 12px;
+    padding: 16px;
+}}
+.signal-card {{
+    background: #1e293b; border: 1px solid #334155; border-radius: 10px;
+    padding: 16px; transition: border-color 0.15s;
+}}
+.signal-card:active {{ border-color: #3b82f6; }}
+.card-header {{
+    display: flex; justify-content: space-between; align-items: flex-start;
+}}
+.card-ticker {{
+    font-size: 18px; font-weight: 700;
+}}
+.card-ticker a {{ color: #3b82f6; text-decoration: none; }}
+.card-price {{ font-size: 16px; font-weight: 600; color: #f1f5f9; }}
+.card-signal {{
+    margin: 8px 0; display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+}}
+.card-metrics {{
+    display: grid; grid-template-columns: 1fr 1fr; gap: 6px 16px;
+    font-size: 13px; margin-top: 8px;
+}}
+.card-metrics .metric-label {{ color: #64748b; font-size: 11px; }}
+.card-metrics .metric-value {{ color: #e2e8f0; font-weight: 500; }}
+.card-details {{
+    display: none; margin-top: 12px; border-top: 1px solid #334155;
+    padding-top: 12px;
+}}
+.signal-card.expanded .card-details {{ display: block; }}
+.card-expand-btn {{
+    background: none; border: none; color: #64748b; font-size: 12px;
+    cursor: pointer; padding: 8px 0; width: 100%; text-align: center;
+    margin-top: 4px;
+}}
+.card-expand-btn:active {{ color: #3b82f6; }}
+.card-detail-grid {{
+    display: grid; grid-template-columns: 1fr 1fr; gap: 6px 16px;
+    font-size: 13px;
+}}
+
+/* ── Mobile Responsive ────────────────────────────────────────────── */
+@media (max-width: 768px) {{
+    .table-container {{ display: none; }}
+    .card-container {{ display: flex; }}
+    .header {{
+        flex-direction: column; align-items: flex-start;
+        padding: 12px 16px;
+    }}
+    .header-right {{
+        width: 100%; display: flex; flex-wrap: wrap; gap: 6px;
+    }}
+    .header-right .btn {{
+        min-height: 44px; flex: 1; min-width: 0;
+        display: flex; align-items: center; justify-content: center;
+    }}
+    .controls {{
+        padding: 10px 16px; gap: 8px;
+        flex-direction: column; align-items: stretch;
+    }}
+    .control-group {{
+        flex-wrap: wrap;
+    }}
+    .toggle-btn {{
+        min-height: 44px; padding: 8px 14px; font-size: 13px;
+    }}
+    select {{
+        min-height: 44px; font-size: 14px; padding: 8px 12px;
+    }}
+    .single-scan {{
+        margin-left: 0; width: 100%;
+    }}
+    .single-scan input {{
+        flex: 1; min-height: 44px; font-size: 14px;
+    }}
+    .single-scan .btn {{
+        min-height: 44px;
+    }}
+    .stats {{
+        padding: 12px 16px; gap: 8px;
+    }}
+    .stat-card {{
+        flex: 1 1 calc(50% - 4px); min-width: 0;
+        padding: 10px 12px;
+    }}
+    .stat-card .value {{ font-size: 20px; }}
+    .stat-card .label {{ font-size: 10px; }}
+    .toast {{
+        left: 16px; right: 16px; bottom: 16px;
+        text-align: center;
+    }}
+    .server-only {{ display: none !important; }}
+}}
 </style>
 </head>
 <body>
@@ -189,9 +290,10 @@ canvas.sparkline {{ display: block; }}
         </div>
     </div>
     <div class="header-right">
-        <span id="serverStatus"><span class="status-dot status-red"></span>Offline</span>
-        <button class="btn" onclick="downloadExcel()">Excel Download</button>
-        <button class="btn btn-primary" onclick="runNewScan()">Novi Scan</button>
+        <span id="serverStatus" class="server-only"><span class="status-dot status-red"></span>Offline</span>
+        <button class="btn server-only" onclick="downloadExcel()">Excel Download</button>
+        <button class="btn server-only" onclick="runNewScan()">Novi Scan</button>
+        <button class="btn btn-primary" onclick="triggerGitHubScan()">&#9729; Cloud Scan</button>
     </div>
 </div>
 
@@ -267,6 +369,8 @@ canvas.sparkline {{ display: block; }}
 <tbody id="signalBody"></tbody>
 </table>
 </div>
+
+<div class="card-container" id="cardContainer"></div>
 
 <div class="toast" id="toast"></div>
 
@@ -398,6 +502,85 @@ function renderTable() {{
             drawSparkline(canvas, s.sparkline);
         }}
     }});
+
+    // Render cards for mobile
+    renderCards(filtered);
+}}
+
+function renderCards(filtered) {{
+    let container = document.getElementById('cardContainer');
+    if (!container) return;
+    container.innerHTML = '';
+
+    filtered.forEach((s, idx) => {{
+        let dirCls = s.signal_direction === 'BULLISH' ? 'stock-buy' : 'stock-sell';
+        let dirLabel = s.signal_direction === 'BULLISH' ? '&#8593; BUY' : '&#8595; SELL';
+        let signalHtml = getSignalHTML(s);
+        let scoreVal = (s.score || 0).toFixed(1);
+        let scoreCls = s.score >= 65 ? 'score-green' : s.score >= 45 ? 'score-yellow' : 'score-red';
+
+        let card = document.createElement('div');
+        card.className = 'signal-card';
+        card.innerHTML = `
+            <div class="card-header">
+                <div class="card-ticker">
+                    <a href="https://www.tradingview.com/chart/?symbol=${{s.ticker}}" target="_blank">${{s.ticker}}</a>
+                    <span class="${{dirCls}}" style="font-size:14px;margin-left:6px">${{dirLabel}}</span>
+                </div>
+                <div class="card-price">$${{s.last_price.toFixed(2)}}</div>
+            </div>
+            <div class="card-signal">${{signalHtml}}</div>
+            <div style="margin:6px 0">
+                <span style="font-weight:600">${{scoreVal}}</span>
+                <div class="score-bar" style="width:80px;margin-left:8px">
+                    <div class="score-fill ${{scoreCls}}" style="width:${{s.score || 0}}%"></div>
+                </div>
+            </div>
+            <div class="card-metrics">
+                <div><span class="metric-label">RSI</span><br><span class="metric-value">${{getRSIHTML(s.rsi)}}</span></div>
+                <div><span class="metric-label">BBW%</span><br><span class="metric-value">${{s.bbw_pct != null ? s.bbw_pct.toFixed(1) : '-'}}</span></div>
+                <div><span class="metric-label">Weekly</span><br><span class="metric-value">${{getWeeklyHTML(s)}}</span></div>
+                <div><span class="metric-label">TTM</span><br><span class="metric-value">${{getTTMHTML(s)}}</span></div>
+            </div>
+            <div class="card-details">
+                <div class="card-detail-grid">
+                    <div><span class="metric-label">ATR%</span><br><span class="metric-value">${{s.atr_pct != null ? s.atr_pct.toFixed(2) : '-'}}</span></div>
+                    <div><span class="metric-label">IV Rank</span><br><span class="metric-value">${{getIVRankHTML(s.iv_rank)}}</span></div>
+                    <div><span class="metric-label">Option</span><br><span class="metric-value">${{s.option_strategy}}</span></div>
+                    <div><span class="metric-label">DTE</span><br><span class="metric-value">${{s.dte_range}}</span></div>
+                </div>
+                <div style="margin-top:8px">${{getConfirmHTML(s)}}</div>
+                <div style="margin-top:6px">${{getPatternsHTML(s.patterns)}}</div>
+                <canvas class="sparkline" id="card-spark-${{idx}}" width="240" height="40" style="margin-top:8px;width:100%"></canvas>
+            </div>
+            <button class="card-expand-btn" onclick="toggleCard(this)">Detalji &#9660;</button>
+        `;
+        container.appendChild(card);
+    }});
+}}
+
+function toggleCard(btn) {{
+    let card = btn.closest('.signal-card');
+    let wasExpanded = card.classList.contains('expanded');
+    card.classList.toggle('expanded');
+    btn.innerHTML = wasExpanded ? 'Detalji &#9660;' : 'Zatvori &#9650;';
+
+    // Draw sparkline on first expand
+    if (!wasExpanded) {{
+        let canvas = card.querySelector('.sparkline');
+        if (canvas && canvas.id.startsWith('card-spark-')) {{
+            let idx = parseInt(canvas.id.replace('card-spark-', ''));
+            let filtered = SIGNALS.filter(s => {{
+                if (currentSignalFilter !== 'all' && s.signal_type !== currentSignalFilter) return false;
+                if (currentDirFilter !== 'all' && s.signal_direction !== currentDirFilter) return false;
+                return true;
+            }});
+            let sig = filtered[idx];
+            if (sig && sig.sparkline && sig.sparkline.length > 1) {{
+                requestAnimationFrame(() => drawSparkline(canvas, sig.sparkline));
+            }}
+        }}
+    }}
 }}
 
 function drawSparkline(canvas, data) {{
@@ -510,6 +693,46 @@ async function downloadExcel() {{
     }} catch(e) {{
         showToast('Server nije dostupan za download.');
     }}
+}}
+
+// GitHub Actions dispatch
+const GITHUB_REPO = '{github_repo}';
+async function triggerGitHubScan() {{
+    let token = localStorage.getItem('gh_pat');
+    if (!token) {{
+        token = prompt('GitHub Personal Access Token (actions:write scope).\\nSprema se lokalno na ovom uređaju:');
+        if (!token) return;
+        localStorage.setItem('gh_pat', token);
+    }}
+    try {{
+        showToast('Pokrećem Cloud Scan...');
+        let resp = await fetch(
+            `https://api.github.com/repos/${{GITHUB_REPO}}/actions/workflows/daily_scan.yml/dispatches`,
+            {{
+                method: 'POST',
+                headers: {{
+                    'Authorization': `token ${{token}}`,
+                    'Accept': 'application/vnd.github.v3+json'
+                }},
+                body: JSON.stringify({{ ref: 'main' }})
+            }}
+        );
+        if (resp.status === 204) {{
+            showToast('Scan pokrenut! Rezultati za ~5 min. Osvježi stranicu.');
+        }} else if (resp.status === 401) {{
+            localStorage.removeItem('gh_pat');
+            showToast('Token nevažeći. Pokušaj ponovo.');
+        }} else {{
+            showToast('Greška: ' + resp.status);
+        }}
+    }} catch(e) {{
+        showToast('Mrežna greška. Provjeri internetsku vezu.');
+    }}
+}}
+
+function clearGitHubToken() {{
+    localStorage.removeItem('gh_pat');
+    showToast('GitHub token obrisan.');
 }}
 
 // Server heartbeat
