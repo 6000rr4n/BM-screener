@@ -1,4 +1,4 @@
-"""Dashboard generator: single-file HTML with inline CSS + JS, dark theme."""
+"""Dashboard generator: single-file HTML with inline CSS + JS, dark theme, PWA-ready."""
 
 import json
 import logging
@@ -41,15 +41,29 @@ def generate_dashboard(signals: list[dict[str, Any]], scan_info: dict[str, Any])
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Stock Scanner</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="BM Scanner">
+<meta name="theme-color" content="#0f172a">
+<meta name="mobile-web-app-capable" content="yes">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect fill='%230f172a' width='100' height='100' rx='20'/><text x='50' y='68' text-anchor='middle' font-size='50' fill='%233b82f6'>S</text></svg>">
+<title>BM Stock Scanner</title>
 <style>
 * {{ margin: 0; padding: 0; box-sizing: border-box; }}
 body {{
-    font-family: system-ui, -apple-system, sans-serif;
+    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', system-ui, sans-serif;
     background: #0f172a; color: #f1f5f9;
     min-height: 100vh;
+    min-height: -webkit-fill-available;
+    -webkit-tap-highlight-color: transparent;
+    -webkit-text-size-adjust: 100%;
+    overscroll-behavior-y: contain;
 }}
+html {{ height: -webkit-fill-available; }}
+
+/* ── Header ──────────────────────────────────────────────────────── */
 .header {{
     background: #1e293b; border-bottom: 1px solid #334155;
     padding: 16px 24px; display: flex; align-items: center;
@@ -62,16 +76,37 @@ body {{
     padding: 8px 16px; border-radius: 6px; border: 1px solid #334155;
     background: #1e293b; color: #f1f5f9; cursor: pointer;
     font-size: 13px; transition: all 0.15s;
+    -webkit-touch-callout: none;
 }}
 .btn:hover {{ background: #334155; }}
+.btn:active {{ background: #475569; transform: scale(0.97); }}
 .btn-primary {{ background: #3b82f6; border-color: #3b82f6; }}
 .btn-primary:hover {{ background: #2563eb; }}
+.btn-primary:active {{ background: #1d4ed8; }}
 .status-dot {{
     width: 8px; height: 8px; border-radius: 50%;
     display: inline-block; margin-right: 4px;
 }}
 .status-green {{ background: #22c55e; }}
 .status-red {{ background: #ef4444; }}
+
+/* ── Pull to Refresh indicator ───────────────────────────────────── */
+.pull-indicator {{
+    text-align: center; padding: 0; height: 0; overflow: hidden;
+    background: #1e293b; color: #64748b; font-size: 13px;
+    transition: height 0.2s, padding 0.2s;
+    display: flex; align-items: center; justify-content: center; gap: 8px;
+}}
+.pull-indicator.visible {{ height: 48px; padding: 12px; }}
+.pull-indicator.loading {{ color: #3b82f6; }}
+.pull-spinner {{
+    width: 18px; height: 18px; border: 2px solid #334155;
+    border-top-color: #3b82f6; border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+}}
+@keyframes spin {{ to {{ transform: rotate(360deg); }} }}
+
+/* ── Controls ────────────────────────────────────────────────────── */
 .controls {{
     background: #1e293b; border-bottom: 1px solid #334155;
     padding: 12px 24px; display: flex; flex-wrap: wrap; gap: 12px; align-items: center;
@@ -87,6 +122,7 @@ body {{
     font-size: 12px; transition: all 0.15s;
 }}
 .toggle-btn.active {{ background: #3b82f6; color: #fff; border-color: #3b82f6; }}
+.toggle-btn:active {{ transform: scale(0.95); }}
 select {{
     padding: 5px 10px; border-radius: 4px; border: 1px solid #334155;
     background: #0f172a; color: #f1f5f9; font-size: 12px;
@@ -98,6 +134,25 @@ select {{
     padding: 5px 10px; border-radius: 4px; border: 1px solid #334155;
     background: #0f172a; color: #f1f5f9; font-size: 12px; width: 100px;
 }}
+
+/* ── Mobile filter drawer ────────────────────────────────────────── */
+.filter-toggle-bar {{
+    display: none;
+    background: #1e293b; border-bottom: 1px solid #334155;
+    padding: 10px 16px;
+}}
+.filter-toggle-bar button {{
+    width: 100%; padding: 10px; border-radius: 8px; border: 1px solid #334155;
+    background: #0f172a; color: #94a3b8; font-size: 13px; cursor: pointer;
+    display: flex; align-items: center; justify-content: center; gap: 6px;
+}}
+.filter-toggle-bar button:active {{ background: #1e293b; }}
+.filter-drawer {{ max-height: 2000px; transition: max-height 0.3s ease; overflow: hidden; }}
+.filter-drawer.collapsed {{ max-height: 0; }}
+.filter-drawer.collapsed + .filter-toggle-bar button .chevron {{ transform: rotate(0deg); }}
+.chevron {{ transition: transform 0.2s; transform: rotate(180deg); display: inline-block; }}
+
+/* ── Stats ────────────────────────────────────────────────────────── */
 .stats {{
     display: flex; gap: 12px; padding: 16px 24px; flex-wrap: wrap;
 }}
@@ -107,6 +162,8 @@ select {{
 }}
 .stat-card .value {{ font-size: 24px; font-weight: 700; }}
 .stat-card .label {{ font-size: 11px; color: #94a3b8; margin-top: 2px; }}
+
+/* ── Table ────────────────────────────────────────────────────────── */
 .table-container {{
     padding: 0 24px 24px; overflow-x: auto;
 }}
@@ -172,73 +229,132 @@ tbody tr:hover {{ background: #1e293b; }}
 }}
 canvas.sparkline {{ display: block; }}
 .sub-text {{ font-size: 10px; color: #94a3b8; }}
+
+/* ── Toast ────────────────────────────────────────────────────────── */
 .toast {{
     position: fixed; bottom: 24px; right: 24px;
-    background: #ef4444; color: #fff; padding: 12px 20px;
-    border-radius: 8px; font-size: 13px; display: none;
-    z-index: 1000; box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+    background: #1e293b; color: #f1f5f9; padding: 14px 20px;
+    border-radius: 12px; font-size: 13px;
+    display: flex; align-items: center; gap: 8px;
+    z-index: 1000; box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+    border: 1px solid #334155;
+    transform: translateY(100px); opacity: 0;
+    transition: transform 0.3s ease, opacity 0.3s ease;
 }}
-.toast.show {{ display: block; }}
+.toast.show {{ transform: translateY(0); opacity: 1; }}
+.toast.toast-error {{ border-color: #ef4444; }}
+.toast.toast-success {{ border-color: #22c55e; }}
 
 /* ── Card Layout (mobile) ─────────────────────────────────────────── */
 .card-container {{
     display: none;
     flex-direction: column;
-    gap: 12px;
-    padding: 16px;
+    gap: 10px;
+    padding: 12px;
+    padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px));
 }}
 .signal-card {{
-    background: #1e293b; border: 1px solid #334155; border-radius: 10px;
-    padding: 16px; transition: border-color 0.15s;
+    background: #1e293b; border: 1px solid #334155; border-radius: 12px;
+    padding: 14px 16px; transition: all 0.2s ease;
+    -webkit-touch-callout: none;
 }}
-.signal-card:active {{ border-color: #3b82f6; }}
+.signal-card.expanded {{ border-color: #3b82f6; }}
+.signal-card.bullish-card {{ border-left: 3px solid #22c55e; }}
+.signal-card.bearish-card {{ border-left: 3px solid #ef4444; }}
 .card-header {{
-    display: flex; justify-content: space-between; align-items: flex-start;
+    display: flex; justify-content: space-between; align-items: center;
 }}
 .card-ticker {{
     font-size: 18px; font-weight: 700;
+    display: flex; align-items: center; gap: 8px;
 }}
 .card-ticker a {{ color: #3b82f6; text-decoration: none; }}
 .card-price {{ font-size: 16px; font-weight: 600; color: #f1f5f9; }}
 .card-signal {{
     margin: 8px 0; display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
 }}
-.card-metrics {{
-    display: grid; grid-template-columns: 1fr 1fr; gap: 6px 16px;
-    font-size: 13px; margin-top: 8px;
+.card-score-row {{
+    display: flex; align-items: center; gap: 10px; margin: 6px 0;
 }}
-.card-metrics .metric-label {{ color: #64748b; font-size: 11px; }}
-.card-metrics .metric-value {{ color: #e2e8f0; font-weight: 500; }}
+.card-score-value {{
+    font-size: 20px; font-weight: 700; min-width: 44px;
+}}
+.card-score-bar {{
+    flex: 1; height: 8px; background: #334155; border-radius: 4px;
+    overflow: hidden;
+}}
+.card-score-bar .score-fill {{ height: 100%; border-radius: 4px; }}
+.card-metrics {{
+    display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 8px;
+    font-size: 13px; margin-top: 10px;
+}}
+.metric-cell {{
+    background: #0f172a; border-radius: 8px; padding: 8px;
+    text-align: center;
+}}
+.card-metrics .metric-label {{ color: #64748b; font-size: 10px; text-transform: uppercase; letter-spacing: 0.3px; }}
+.card-metrics .metric-value {{ color: #e2e8f0; font-weight: 600; font-size: 14px; margin-top: 2px; }}
 .card-details {{
     display: none; margin-top: 12px; border-top: 1px solid #334155;
     padding-top: 12px;
+    animation: slideDown 0.2s ease;
+}}
+@keyframes slideDown {{
+    from {{ opacity: 0; transform: translateY(-8px); }}
+    to {{ opacity: 1; transform: translateY(0); }}
 }}
 .signal-card.expanded .card-details {{ display: block; }}
 .card-expand-btn {{
     background: none; border: none; color: #64748b; font-size: 12px;
-    cursor: pointer; padding: 8px 0; width: 100%; text-align: center;
-    margin-top: 4px;
+    cursor: pointer; padding: 10px 0 2px; width: 100%; text-align: center;
+    -webkit-touch-callout: none;
 }}
 .card-expand-btn:active {{ color: #3b82f6; }}
 .card-detail-grid {{
-    display: grid; grid-template-columns: 1fr 1fr; gap: 6px 16px;
+    display: grid; grid-template-columns: 1fr 1fr; gap: 8px;
     font-size: 13px;
 }}
+.card-detail-grid .metric-cell {{ text-align: left; padding: 8px 10px; }}
+.card-confirm-section {{
+    margin-top: 10px; padding: 10px; background: #0f172a;
+    border-radius: 8px;
+}}
+.card-sparkline-wrap {{
+    margin-top: 10px; background: #0f172a; border-radius: 8px;
+    padding: 8px; overflow: hidden;
+}}
+
+/* ── Swipe hint animation ────────────────────────────────────────── */
+.swipe-hint {{
+    text-align: center; padding: 8px; color: #475569; font-size: 11px;
+    display: none;
+}}
+
+/* ── No signals state ────────────────────────────────────────────── */
+.empty-state {{
+    text-align: center; padding: 60px 24px; color: #475569;
+}}
+.empty-state .empty-icon {{ font-size: 48px; margin-bottom: 12px; }}
+.empty-state .empty-text {{ font-size: 16px; color: #64748b; }}
 
 /* ── Mobile Responsive ────────────────────────────────────────────── */
 @media (max-width: 768px) {{
     .table-container {{ display: none; }}
     .card-container {{ display: flex; }}
+    .filter-toggle-bar {{ display: block; }}
     .header {{
         flex-direction: column; align-items: flex-start;
         padding: 12px 16px;
+        padding-top: calc(12px + env(safe-area-inset-top, 0px));
     }}
+    .header-left h1 {{ font-size: 18px; }}
     .header-right {{
         width: 100%; display: flex; flex-wrap: wrap; gap: 6px;
     }}
     .header-right .btn {{
         min-height: 44px; flex: 1; min-width: 0;
         display: flex; align-items: center; justify-content: center;
+        font-size: 13px; border-radius: 8px;
     }}
     .controls {{
         padding: 10px 16px; gap: 8px;
@@ -247,57 +363,81 @@ canvas.sparkline {{ display: block; }}
     .control-group {{
         flex-wrap: wrap;
     }}
+    .control-group label {{
+        width: 100%; margin-bottom: 4px; font-size: 12px;
+    }}
     .toggle-btn {{
         min-height: 44px; padding: 8px 14px; font-size: 13px;
+        border-radius: 8px; flex: 1;
     }}
     select {{
         min-height: 44px; font-size: 14px; padding: 8px 12px;
+        border-radius: 8px; width: 100%;
     }}
     .single-scan {{
         margin-left: 0; width: 100%;
     }}
     .single-scan input {{
-        flex: 1; min-height: 44px; font-size: 14px;
+        flex: 1; min-height: 44px; font-size: 16px;
+        border-radius: 8px; padding: 8px 14px;
     }}
     .single-scan .btn {{
-        min-height: 44px;
+        min-height: 44px; border-radius: 8px;
     }}
     .stats {{
-        padding: 12px 16px; gap: 8px;
+        padding: 10px 12px; gap: 6px;
     }}
     .stat-card {{
-        flex: 1 1 calc(50% - 4px); min-width: 0;
-        padding: 10px 12px;
+        flex: 1 1 calc(50% - 3px); min-width: 0;
+        padding: 10px 8px; border-radius: 10px;
     }}
     .stat-card .value {{ font-size: 20px; }}
     .stat-card .label {{ font-size: 10px; }}
-    .toast {{
-        left: 16px; right: 16px; bottom: 16px;
-        text-align: center;
+    .stat-card:first-child {{
+        flex: 1 1 100%;
     }}
+    .toast {{
+        left: 12px; right: 12px;
+        bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+        text-align: center; justify-content: center;
+        border-radius: 12px;
+    }}
+    .swipe-hint {{ display: block; }}
     .server-only {{ display: none !important; }}
+}}
+
+/* ── Small phones ─────────────────────────────────────────────────── */
+@media (max-width: 380px) {{
+    .card-metrics {{ grid-template-columns: 1fr 1fr; }}
+    .stat-card .value {{ font-size: 18px; }}
+    .card-ticker {{ font-size: 16px; }}
+    .card-price {{ font-size: 15px; }}
 }}
 </style>
 </head>
 <body>
 
+<div class="pull-indicator" id="pullIndicator">
+    <span id="pullText">Povuci za osvjezavanje</span>
+</div>
+
 <div class="header">
     <div class="header-left">
-        <h1>Stock Scanner</h1>
+        <h1>BM Stock Scanner</h1>
         <div class="meta">
-            {scan_time} &middot; {total_tickers} tickers scanned &middot;
+            {scan_time} &middot; {total_tickers} tickers &middot;
             {total_signals} signals &middot; {scan_duration}s
         </div>
     </div>
     <div class="header-right">
         <span id="serverStatus" class="server-only"><span class="status-dot status-red"></span>Offline</span>
-        <button class="btn server-only" onclick="downloadExcel()">Excel Download</button>
+        <button class="btn server-only" onclick="downloadExcel()">Excel</button>
         <button class="btn server-only" onclick="runNewScan()">Novi Scan</button>
         <button class="btn btn-primary" onclick="triggerGitHubScan()">&#9729; Cloud Scan</button>
     </div>
 </div>
 
-<div class="controls">
+<div class="controls filter-drawer" id="filterDrawer">
     <div class="control-group">
         <label>Liste:</label>
         <button class="toggle-btn active" data-list="sp500" onclick="toggleList(this)">S&P 500</button>
@@ -335,6 +475,12 @@ canvas.sparkline {{ display: block; }}
         <input type="text" id="singleTicker" placeholder="AAPL" />
         <button class="btn" onclick="scanSingle()">Scan</button>
     </div>
+</div>
+<div class="filter-toggle-bar">
+    <button onclick="toggleFilterDrawer()">
+        <span>Filteri</span>
+        <span class="chevron" id="filterChevron">&#9660;</span>
+    </button>
 </div>
 
 <div class="stats">
@@ -512,51 +658,74 @@ function renderCards(filtered) {{
     if (!container) return;
     container.innerHTML = '';
 
+    if (filtered.length === 0) {{
+        container.innerHTML = `<div class="empty-state">
+            <div class="empty-icon">&#128269;</div>
+            <div class="empty-text">Nema signala za odabrane filtere</div>
+        </div>`;
+        return;
+    }}
+
     filtered.forEach((s, idx) => {{
         let dirCls = s.signal_direction === 'BULLISH' ? 'stock-buy' : 'stock-sell';
         let dirLabel = s.signal_direction === 'BULLISH' ? '&#8593; BUY' : '&#8595; SELL';
         let signalHtml = getSignalHTML(s);
         let scoreVal = (s.score || 0).toFixed(1);
         let scoreCls = s.score >= 65 ? 'score-green' : s.score >= 45 ? 'score-yellow' : 'score-red';
+        let cardBorder = s.signal_direction === 'BULLISH' ? 'bullish-card' : 'bearish-card';
+        let confirmIcon = s.confirmed ? '&#10003;' : '&#10007;';
+        let confirmCls = s.confirmed ? 'confirm-yes' : 'confirm-no';
 
         let card = document.createElement('div');
-        card.className = 'signal-card';
+        card.className = `signal-card ${{cardBorder}}`;
         card.innerHTML = `
             <div class="card-header">
                 <div class="card-ticker">
                     <a href="https://www.tradingview.com/chart/?symbol=${{s.ticker}}" target="_blank">${{s.ticker}}</a>
-                    <span class="${{dirCls}}" style="font-size:14px;margin-left:6px">${{dirLabel}}</span>
+                    <span class="${{dirCls}}" style="font-size:13px">${{dirLabel}}</span>
+                    <span class="${{confirmCls}}" style="font-size:14px">${{confirmIcon}}</span>
                 </div>
                 <div class="card-price">$${{s.last_price.toFixed(2)}}</div>
             </div>
             <div class="card-signal">${{signalHtml}}</div>
-            <div style="margin:6px 0">
-                <span style="font-weight:600">${{scoreVal}}</span>
-                <div class="score-bar" style="width:80px;margin-left:8px">
-                    <div class="score-fill ${{scoreCls}}" style="width:${{s.score || 0}}%"></div>
+            <div class="card-score-row">
+                <span class="card-score-value ${{scoreCls}}">${{scoreVal}}</span>
+                <div class="card-score-bar">
+                    <div class="score-fill ${{scoreCls}}" style="width:${{Math.min(s.score || 0, 100)}}%"></div>
                 </div>
             </div>
             <div class="card-metrics">
-                <div><span class="metric-label">RSI</span><br><span class="metric-value">${{getRSIHTML(s.rsi)}}</span></div>
-                <div><span class="metric-label">BBW%</span><br><span class="metric-value">${{s.bbw_pct != null ? s.bbw_pct.toFixed(1) : '-'}}</span></div>
-                <div><span class="metric-label">Weekly</span><br><span class="metric-value">${{getWeeklyHTML(s)}}</span></div>
-                <div><span class="metric-label">TTM</span><br><span class="metric-value">${{getTTMHTML(s)}}</span></div>
+                <div class="metric-cell"><span class="metric-label">RSI</span><div class="metric-value">${{getRSIHTML(s.rsi)}}</div></div>
+                <div class="metric-cell"><span class="metric-label">BBW%</span><div class="metric-value">${{s.bbw_pct != null ? s.bbw_pct.toFixed(1) : '-'}}</div></div>
+                <div class="metric-cell"><span class="metric-label">Weekly</span><div class="metric-value">${{getWeeklyHTML(s)}}</div></div>
+                <div class="metric-cell"><span class="metric-label">TTM</span><div class="metric-value">${{getTTMHTML(s)}}</div></div>
             </div>
             <div class="card-details">
                 <div class="card-detail-grid">
-                    <div><span class="metric-label">ATR%</span><br><span class="metric-value">${{s.atr_pct != null ? s.atr_pct.toFixed(2) : '-'}}</span></div>
-                    <div><span class="metric-label">IV Rank</span><br><span class="metric-value">${{getIVRankHTML(s.iv_rank)}}</span></div>
-                    <div><span class="metric-label">Option</span><br><span class="metric-value">${{s.option_strategy}}</span></div>
-                    <div><span class="metric-label">DTE</span><br><span class="metric-value">${{s.dte_range}}</span></div>
+                    <div class="metric-cell"><span class="metric-label">ATR%</span><div class="metric-value">${{s.atr_pct != null ? s.atr_pct.toFixed(2) : '-'}}</div></div>
+                    <div class="metric-cell"><span class="metric-label">IV Rank</span><div class="metric-value">${{getIVRankHTML(s.iv_rank)}}</div></div>
+                    <div class="metric-cell"><span class="metric-label">Option</span><div class="metric-value" style="font-size:11px">${{s.option_strategy}}</div></div>
+                    <div class="metric-cell"><span class="metric-label">DTE</span><div class="metric-value">${{s.dte_range}}</div></div>
                 </div>
-                <div style="margin-top:8px">${{getConfirmHTML(s)}}</div>
-                <div style="margin-top:6px">${{getPatternsHTML(s.patterns)}}</div>
-                <canvas class="sparkline" id="card-spark-${{idx}}" width="240" height="40" style="margin-top:8px;width:100%"></canvas>
+                <div class="card-confirm-section">${{getConfirmHTML(s)}}</div>
+                <div style="margin-top:8px">${{getPatternsHTML(s.patterns)}}</div>
+                <div class="card-sparkline-wrap">
+                    <canvas class="sparkline" id="card-spark-${{idx}}" width="300" height="50"></canvas>
+                </div>
             </div>
             <button class="card-expand-btn" onclick="toggleCard(this)">Detalji &#9660;</button>
         `;
         container.appendChild(card);
     }});
+
+    // Show swipe hint on first visit
+    if (!localStorage.getItem('hint_seen')) {{
+        let hint = document.createElement('div');
+        hint.className = 'swipe-hint';
+        hint.textContent = 'Tap "Detalji" za vise informacija';
+        container.insertBefore(hint, container.firstChild);
+        setTimeout(() => {{ hint.style.display = 'none'; localStorage.setItem('hint_seen', '1'); }}, 5000);
+    }}
 }}
 
 function toggleCard(btn) {{
@@ -637,12 +806,69 @@ function setDirFilter(btn) {{
     renderTable();
 }}
 
-function showToast(msg) {{
+function showToast(msg, type) {{
     let t = document.getElementById('toast');
     t.textContent = msg;
-    t.classList.add('show');
+    t.className = 'toast show' + (type === 'error' ? ' toast-error' : type === 'success' ? ' toast-success' : '');
     setTimeout(() => t.classList.remove('show'), 4000);
 }}
+
+// ── Filter drawer toggle ──────────────────────────────────
+let filterOpen = false;
+function toggleFilterDrawer() {{
+    let drawer = document.getElementById('filterDrawer');
+    let chevron = document.getElementById('filterChevron');
+    filterOpen = !filterOpen;
+    if (filterOpen) {{
+        drawer.classList.remove('collapsed');
+        chevron.style.transform = 'rotate(180deg)';
+    }} else {{
+        drawer.classList.add('collapsed');
+        chevron.style.transform = 'rotate(0deg)';
+    }}
+}}
+// Start collapsed on mobile
+if (window.innerWidth <= 768) {{
+    document.getElementById('filterDrawer').classList.add('collapsed');
+}}
+
+// ── Pull to Refresh (mobile, static page) ─────────────────
+(function() {{
+    let startY = 0;
+    let pulling = false;
+    let indicator = document.getElementById('pullIndicator');
+    let pullText = document.getElementById('pullText');
+
+    document.addEventListener('touchstart', function(e) {{
+        if (window.scrollY === 0 && window.innerWidth <= 768) {{
+            startY = e.touches[0].clientY;
+            pulling = true;
+        }}
+    }}, {{ passive: true }});
+
+    document.addEventListener('touchmove', function(e) {{
+        if (!pulling) return;
+        let dy = e.touches[0].clientY - startY;
+        if (dy > 20 && dy < 150) {{
+            indicator.classList.add('visible');
+            pullText.textContent = dy > 80 ? 'Pusti za osvjezavanje' : 'Povuci za osvjezavanje';
+        }}
+    }}, {{ passive: true }});
+
+    document.addEventListener('touchend', function(e) {{
+        if (!pulling) return;
+        pulling = false;
+        let wasVisible = indicator.classList.contains('visible');
+        let text = pullText.textContent;
+        if (wasVisible && text === 'Pusti za osvjezavanje') {{
+            pullText.innerHTML = '<div class="pull-spinner"></div> Osvjezavam...';
+            indicator.classList.add('loading');
+            setTimeout(() => location.reload(), 600);
+        }} else {{
+            indicator.classList.remove('visible');
+        }}
+    }}, {{ passive: true }});
+}})();
 
 async function runNewScan() {{
     let params = {{
