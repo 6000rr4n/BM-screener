@@ -217,23 +217,37 @@ def detect_signals_for_ticker(
         df = detect_breakout_signals(df, mode)
         df = detect_meanrev_signals(df, mode)
 
-        last = df.iloc[-1]
-
-        # Determine which signal fired on the last bar
+        # Check last N bars for signals (not just the very last bar)
+        lookback = min(config.SIGNAL_LOOKBACK, len(df))
         signal_type: Optional[str] = None
         signal_direction: Optional[str] = None
+        signal_bar_idx: int = -1
 
-        if last.get("bull_breakout", False):
-            signal_type, signal_direction = "BREAKOUT", "BULLISH"
-        elif last.get("bear_breakout", False):
-            signal_type, signal_direction = "BREAKOUT", "BEARISH"
-        elif last.get("bull_mean_rev", False):
-            signal_type, signal_direction = "MEAN_REV", "BULLISH"
-        elif last.get("bear_mean_rev", False):
-            signal_type, signal_direction = "MEAN_REV", "BEARISH"
+        for offset in range(lookback):
+            idx = -(offset + 1)
+            row = df.iloc[idx]
+            if row.get("bull_breakout", False):
+                signal_type, signal_direction = "BREAKOUT", "BULLISH"
+                signal_bar_idx = idx
+                break
+            elif row.get("bear_breakout", False):
+                signal_type, signal_direction = "BREAKOUT", "BEARISH"
+                signal_bar_idx = idx
+                break
+            elif row.get("bull_mean_rev", False):
+                signal_type, signal_direction = "MEAN_REV", "BULLISH"
+                signal_bar_idx = idx
+                break
+            elif row.get("bear_mean_rev", False):
+                signal_type, signal_direction = "MEAN_REV", "BEARISH"
+                signal_bar_idx = idx
+                break
 
         if signal_type is None:
             return None
+
+        # Use the last bar for current indicator values (price, RSI, etc.)
+        # but the signal was detected on signal_bar_idx
 
         # Weekly trend
         weekly_info = calc_weekly_trend(df_weekly)

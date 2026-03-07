@@ -48,7 +48,10 @@ def run_scan(
     logger.info(f"Fetching ticker lists (SP500={use_sp500}, NASDAQ={use_nasdaq}, DOW={use_dow}, Custom={use_custom})")
     tickers = get_all_tickers(use_sp500, use_nasdaq, use_dow, use_custom)
     total_tickers = len(tickers)
-    logger.info(f"Scanning {total_tickers} tickers in {mode} mode (EMA filter: {use_ema_filter})")
+    if total_tickers == 0:
+        logger.error("No tickers found! Check your internet connection and ticker sources.")
+        return {"signals": [], "total_tickers": 0, "scan_time": 0, "errors": ["No tickers found"], "mode": mode, "use_ema_filter": use_ema_filter}
+    logger.info(f"Scanning {total_tickers} tickers in {mode} mode (EMA filter: {use_ema_filter}, lookback: {config.SIGNAL_LOOKBACK} bars)")
 
     signals: list[dict] = []
     done = 0

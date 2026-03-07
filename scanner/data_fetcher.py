@@ -17,6 +17,48 @@ ssl._create_default_https_context = ssl._create_unverified_context
 
 logger = logging.getLogger(__name__)
 
+# Fallback ticker lists when Wikipedia scraping fails
+_FALLBACK_SP500 = [
+    "AAPL", "ABBV", "ABT", "ACN", "ADBE", "ADI", "ADM", "ADP", "ADSK", "AEP",
+    "AIG", "ALL", "AMAT", "AMD", "AMGN", "AMP", "AMZN", "ANET", "ANSS", "AON",
+    "APD", "APH", "AVGO", "AXP", "BA", "BAC", "BDX", "BK", "BKNG", "BLK",
+    "BMY", "BRK-B", "BSX", "C", "CAT", "CB", "CCI", "CDNS", "CEG", "CHTR",
+    "CI", "CL", "CMCSA", "CME", "CMG", "COP", "COST", "CRM", "CSCO", "CTAS",
+    "CVS", "CVX", "D", "DE", "DHR", "DIS", "DLR", "DOW", "DUK", "ECL",
+    "EL", "EMR", "EOG", "EQR", "ETN", "EW", "EXC", "F", "FCX", "FDX",
+    "FI", "FICO", "GD", "GE", "GILD", "GM", "GOOG", "GOOGL", "GPN", "GS",
+    "HD", "HON", "HSY", "HUM", "IBM", "ICE", "INTC", "INTU", "ISRG", "ITW",
+    "JNJ", "JPM", "KHC", "KLAC", "KO", "LIN", "LLY", "LMT", "LOW", "LRCX",
+    "MA", "MCD", "MCHP", "MCK", "MCO", "MDLZ", "MDT", "MET", "META", "MMC",
+    "MMM", "MO", "MPC", "MRK", "MS", "MSCI", "MSFT", "MSI", "MU", "NEE",
+    "NFLX", "NKE", "NOC", "NOW", "NSC", "NVDA", "ORCL", "ORLY", "OXY", "PANW",
+    "PCAR", "PEP", "PFE", "PG", "PGR", "PH", "PLTR", "PM", "PNC", "PSA",
+    "PSX", "PYPL", "QCOM", "REGN", "ROP", "ROST", "RTX", "SBUX", "SCHW", "SHW",
+    "SLB", "SMCI", "SNPS", "SO", "SPG", "SRE", "SYK", "SYY", "T", "TDG",
+    "TGT", "TJX", "TMO", "TMUS", "TRV", "TSLA", "TSN", "TT", "TXN", "UNH",
+    "UNP", "UPS", "URI", "USB", "V", "VLO", "VRTX", "VZ", "WBA", "WFC",
+    "WM", "WMT", "XEL", "XOM", "ZTS",
+]
+
+_FALLBACK_NASDAQ100 = [
+    "AAPL", "ABNB", "ADBE", "ADI", "ADP", "ADSK", "AEP", "AMAT", "AMD", "AMGN",
+    "AMZN", "ANSS", "APP", "ARM", "ASML", "AVGO", "AZN", "BIIB", "BKNG", "BKR",
+    "CDNS", "CDW", "CEG", "CHTR", "CMCSA", "COST", "CPRT", "CRWD", "CSCO", "CTAS",
+    "CTSH", "DASH", "DDOG", "DLTR", "DXCM", "EA", "EXC", "FANG", "FAST", "FTNT",
+    "GEHC", "GFS", "GILD", "GOOG", "GOOGL", "HON", "IDXX", "ILMN", "INTC", "INTU",
+    "ISRG", "KDP", "KHC", "KLAC", "LRCX", "LULU", "MAR", "MCHP", "MDB", "MDLZ",
+    "MELI", "META", "MNST", "MRVL", "MSFT", "MU", "NFLX", "NVDA", "NXPI", "ODFL",
+    "ON", "ORLY", "PANW", "PAYX", "PCAR", "PDD", "PEP", "PYPL", "QCOM", "REGN",
+    "ROP", "ROST", "SBUX", "SMCI", "SNPS", "TEAM", "TMUS", "TSLA", "TTD", "TTWO",
+    "TXN", "VRSK", "VRTX", "WBD", "WDAY", "XEL", "ZS",
+]
+
+_FALLBACK_DOW30 = [
+    "AAPL", "AMGN", "AMZN", "AXP", "BA", "CAT", "CRM", "CSCO", "CVX", "DIS",
+    "DOW", "GS", "HD", "HON", "IBM", "JNJ", "JPM", "KO", "MCD", "MMM",
+    "MRK", "MSFT", "NKE", "NVDA", "PG", "SHW", "TRV", "UNH", "V", "WMT",
+]
+
 
 def _normalize_df(df: pd.DataFrame) -> pd.DataFrame:
     """Normalize yfinance DataFrame: fix MultiIndex, lowercase columns, flatten."""
@@ -33,53 +75,57 @@ def _normalize_df(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def fetch_sp500_tickers() -> list[str]:
-    """Fetch S&P 500 ticker list from Wikipedia."""
+    """Fetch S&P 500 ticker list from Wikipedia, with fallback to hardcoded list."""
     try:
         tables = pd.read_html(config.SP500_URL)
         df = tables[0]
         tickers = df["Symbol"].dropna().astype(str).str.strip().tolist()
         # Fix tickers with dots (BRK.B -> BRK-B for yfinance)
         tickers = [t.replace(".", "-") for t in tickers]
-        logger.info(f"Fetched {len(tickers)} S&P 500 tickers")
-        return tickers
+        if len(tickers) > 50:
+            logger.info(f"Fetched {len(tickers)} S&P 500 tickers from Wikipedia")
+            return tickers
+        logger.warning(f"Wikipedia returned only {len(tickers)} S&P 500 tickers, using fallback")
     except Exception as e:
-        logger.error(f"Failed to fetch S&P 500 tickers: {e}")
-        return []
+        logger.warning(f"Wikipedia S&P 500 fetch failed: {e}")
+    logger.info(f"Using fallback S&P 500 list ({len(_FALLBACK_SP500)} tickers)")
+    return list(_FALLBACK_SP500)
 
 
 def fetch_nasdaq100_tickers() -> list[str]:
-    """Fetch Nasdaq 100 ticker list from Wikipedia."""
+    """Fetch Nasdaq 100 ticker list from Wikipedia, with fallback to hardcoded list."""
     try:
         tables = pd.read_html(config.NASDAQ100_URL)
-        # Find the table with a 'Ticker' column
         for table in tables:
             if "Ticker" in table.columns:
                 tickers = table["Ticker"].dropna().astype(str).str.strip().tolist()
                 tickers = [t.replace(".", "-") for t in tickers]
-                logger.info(f"Fetched {len(tickers)} Nasdaq 100 tickers")
-                return tickers
-        logger.warning("Nasdaq 100: no table with 'Ticker' column found")
-        return []
+                if len(tickers) > 20:
+                    logger.info(f"Fetched {len(tickers)} Nasdaq 100 tickers from Wikipedia")
+                    return tickers
+        logger.warning("Nasdaq 100: no valid table found, using fallback")
     except Exception as e:
-        logger.error(f"Failed to fetch Nasdaq 100 tickers: {e}")
-        return []
+        logger.warning(f"Wikipedia Nasdaq 100 fetch failed: {e}")
+    logger.info(f"Using fallback Nasdaq 100 list ({len(_FALLBACK_NASDAQ100)} tickers)")
+    return list(_FALLBACK_NASDAQ100)
 
 
 def fetch_dow30_tickers() -> list[str]:
-    """Fetch Dow Jones 30 ticker list from Wikipedia."""
+    """Fetch Dow Jones 30 ticker list from Wikipedia, with fallback to hardcoded list."""
     try:
         tables = pd.read_html(config.DOW30_URL)
         for table in tables:
             if "Symbol" in table.columns:
                 tickers = table["Symbol"].dropna().astype(str).str.strip().tolist()
                 tickers = [t.replace(".", "-") for t in tickers]
-                logger.info(f"Fetched {len(tickers)} Dow 30 tickers")
-                return tickers
-        logger.warning("Dow 30: no table with 'Symbol' column found")
-        return []
+                if len(tickers) > 10:
+                    logger.info(f"Fetched {len(tickers)} Dow 30 tickers from Wikipedia")
+                    return tickers
+        logger.warning("Dow 30: no valid table found, using fallback")
     except Exception as e:
-        logger.error(f"Failed to fetch Dow 30 tickers: {e}")
-        return []
+        logger.warning(f"Wikipedia Dow 30 fetch failed: {e}")
+    logger.info(f"Using fallback Dow 30 list ({len(_FALLBACK_DOW30)} tickers)")
+    return list(_FALLBACK_DOW30)
 
 
 def load_custom_tickers(filepath: str = "tickers_custom.txt") -> list[str]:

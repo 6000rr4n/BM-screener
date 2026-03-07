@@ -10,6 +10,7 @@ USE_CUSTOM: bool = True
 DEFAULT_MODE: str = "Aggressive"
 USE_EMA_FILTER: bool = False
 MAX_WORKERS: int = 20
+SIGNAL_LOOKBACK: int = 3  # Check last N bars for signals (not just the last bar)
 
 # ── Bollinger Bands ───────────────────────────────────────────────────────────
 BB_LENGTH: int = 20
