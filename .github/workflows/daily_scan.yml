@@ -26,7 +26,7 @@ jobs:
           POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          DASHBOARD_URL: "https://6000rr4n.github.io/BM-screener-mobile/"
+          DASHBOARD_URL: "https://6000rr4n.github.io/BM-screener/"
         run: python -m scanner.main --static
 
       - name: Copy dashboard to docs/
